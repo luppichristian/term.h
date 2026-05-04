@@ -120,7 +120,7 @@ static void tappendf(const char *fmt, ...) {
   va_end(args);
 }
 
-static void tappend_utf8(wchar_t ch) {
+static void tappendutf8(wchar_t ch) {
   char buffer[8];
   int len = WideCharToMultiByte(CP_UTF8, 0, &ch, 1, buffer, sizeof(buffer),
                                 NULL, NULL);
@@ -135,7 +135,7 @@ static void tappend_utf8(wchar_t ch) {
   gTerm.outBufferCount += len;
 }
 
-static void tupdate_size(void) {
+static void tupdatesz(void) {
   CONSOLE_SCREEN_BUFFER_INFO info;
   GetConsoleScreenBufferInfo(gTerm.out, &info);
 
@@ -143,7 +143,7 @@ static void tupdate_size(void) {
   gTerm.height = info.srWindow.Bottom - info.srWindow.Top + 1;
 }
 
-static bool talloc_buffers(void) {
+static bool tallocbuff(void) {
   int count = gTerm.width * gTerm.height;
 
   free(gTerm.cells);
@@ -172,9 +172,9 @@ static bool talloc_buffers(void) {
   return true;
 }
 
-static void tresize_buffers(void) {
-  tupdate_size();
-  talloc_buffers();
+static void tresizebuffs(void) {
+  tupdatesz();
+  tallocbuff();
 
   fputs("\x1b[2J\x1b[H", stdout);
   fflush(stdout);
@@ -209,9 +209,9 @@ bool tinit(void) {
   if (!SetConsoleMode(gTerm.out, outMode))
     return false;
 
-  tupdate_size();
+  tupdatesz();
 
-  if (!talloc_buffers())
+  if (!tallocbuff())
     return false;
 
   fputs("\x1b[?25l\x1b[2J\x1b[H", stdout);
@@ -241,9 +241,9 @@ int twidth(void) { return gTerm.width; }
 
 int theight(void) { return gTerm.height; }
 
-static int ttranslate_key(INPUT_RECORD *r) {
+static int ttranslate(INPUT_RECORD *r) {
   if (r->EventType == WINDOW_BUFFER_SIZE_EVENT) {
-    tresize_buffers();
+    tresizebuffs();
     return TKEY_RESIZE;
   }
 
@@ -298,7 +298,7 @@ int tpoll(void) {
       return TKEY_NONE;
 
     if (readCount > 0) {
-      int key = ttranslate_key(&r);
+      int key = ttranslate(&r);
       if (key != TKEY_NONE)
         return key;
     }
@@ -321,7 +321,7 @@ int twait(void) {
     if (readCount == 0)
       continue;
 
-    int key = ttranslate_key(&r);
+    int key = ttranslate(&r);
     if (key != TKEY_NONE)
       return key;
   }
@@ -391,7 +391,7 @@ void trender(void) {
         currentBg = cell->bg;
       }
 
-      tappend_utf8(cell->ch);
+      tappendutf8(cell->ch);
 
       *old = *cell;
     }
@@ -428,11 +428,11 @@ typedef struct tstate_t {
 
   struct termios oldTermios;
   int oldFlags;
-  struct sigaction oldWinchAction;
+  void (*oldWinchHandler)(int);
 
   bool hasOldTermios;
   bool hasOldFlags;
-  bool hasOldWinchAction;
+  bool hasOldWinchHandler;
 
   int width;
   int height;
@@ -480,7 +480,7 @@ static void tappendf(const char *fmt, ...) {
   va_end(args);
 }
 
-static void tappend_utf8(wchar_t ch) {
+static void tappendutf8(wchar_t ch) {
   char buffer[MB_LEN_MAX];
   mbstate_t state;
   memset(&state, 0, sizeof(state));
@@ -503,7 +503,7 @@ static void thandle_winch(int sig) {
   gTermResizePending = 1;
 }
 
-static void tupdate_size(void) {
+static void tupdatesz(void) {
   struct winsize ws;
 
   if (ioctl(gTerm.outFd, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0 &&
@@ -517,7 +517,7 @@ static void tupdate_size(void) {
   gTerm.height = 25;
 }
 
-static bool talloc_buffers(void) {
+static bool tallocbuff(void) {
   int count = gTerm.width * gTerm.height;
 
   free(gTerm.cells);
@@ -546,10 +546,10 @@ static bool talloc_buffers(void) {
   return true;
 }
 
-static void tresize_buffers(void) {
+static void tresizebuffs(void) {
   gTermResizePending = 0;
-  tupdate_size();
-  talloc_buffers();
+  tupdatesz();
+  tallocbuff();
 
   fputs("\x1b[2J\x1b[H", stdout);
   fflush(stdout);
@@ -758,20 +758,16 @@ bool tinit(void) {
     return false;
   }
 
-  struct sigaction sa;
-  memset(&sa, 0, sizeof(sa));
-  sa.sa_handler = thandle_winch;
-  sigemptyset(&sa.sa_mask);
-
-  if (sigaction(SIGWINCH, &sa, &gTerm.oldWinchAction) != 0) {
+  gTerm.oldWinchHandler = signal(SIGWINCH, thandle_winch);
+  if (gTerm.oldWinchHandler == SIG_ERR) {
     tquit();
     return false;
   }
-  gTerm.hasOldWinchAction = true;
+  gTerm.hasOldWinchHandler = true;
 
-  tupdate_size();
+  tupdatesz();
 
-  if (!talloc_buffers()) {
+  if (!tallocbuff()) {
     tquit();
     return false;
   }
@@ -792,8 +788,8 @@ void tquit(void) {
   if (gTerm.hasOldFlags)
     fcntl(gTerm.inFd, F_SETFL, gTerm.oldFlags);
 
-  if (gTerm.hasOldWinchAction)
-    sigaction(SIGWINCH, &gTerm.oldWinchAction, NULL);
+  if (gTerm.hasOldWinchHandler)
+    signal(SIGWINCH, gTerm.oldWinchHandler);
 
   free(gTerm.cells);
   free(gTerm.oldCells);
@@ -809,7 +805,7 @@ int theight(void) { return gTerm.height; }
 
 int tpoll(void) {
   if (gTermResizePending) {
-    tresize_buffers();
+    tresizebuffs();
     return TKEY_RESIZE;
   }
 
@@ -819,7 +815,7 @@ int tpoll(void) {
 int twait(void) {
   for (;;) {
     if (gTermResizePending) {
-      tresize_buffers();
+      tresizebuffs();
       return TKEY_RESIZE;
     }
 
@@ -893,7 +889,7 @@ void trender(void) {
         currentBg = cell->bg;
       }
 
-      tappend_utf8(cell->ch);
+      tappendutf8(cell->ch);
 
       *old = *cell;
     }

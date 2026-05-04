@@ -1,4 +1,3 @@
-// main.c
 #define TIMPLEMENTATION
 #include "term.h"
 
