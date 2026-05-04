@@ -1,4 +1,4 @@
-# termc
+# term.h
 
 Single-header C library for simple terminal UIs with colored cell rendering and keyboard input.
 
