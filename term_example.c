@@ -14,10 +14,11 @@ int main(void) {
   while (running) {
     // Redraw the full frame into the back buffer each iteration.
     tclear();
+    uint32_t defaultFg = tdefaultfg();
     twrite(0, 0, L"Diff-rendered terminal UI", TRGB(120, 220, 120),
-           TRGB(0, 0, 0));
-    twrite(0, 1, L"Arrow keys move. Q or Escape quits.", TRGB(220, 220, 220),
-           TRGB(0, 0, 0));
+           TDEFAULT);
+    twrite(0, 1, L"Arrow keys move. Q or Escape quits.", defaultFg,
+           TDEFAULT);
     // Draw a colored block by using a space character with a red background.
     tput(x, y, L' ', TRGB(255, 255, 255), TRGB(255, 0, 0));
     trender();

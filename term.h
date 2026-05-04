@@ -12,6 +12,8 @@ extern "C" {
 #define TRGB(r, g, b)                                                          \
   (((uint32_t)(r) << 16) | ((uint32_t)(g) << 8) | ((uint32_t)(b)))
 
+#define TDEFAULT 0xffffffffu
+
 #define TKEY_NONE 0
 #define TKEY_ESCAPE 27
 #define TKEY_BACKSPACE 8
@@ -41,13 +43,17 @@ void tquit(void);
 int twidth(void);
 // Returns the current terminal height in character cells.
 int theight(void);
+// Returns the terminal's default foreground color, or TDEFAULT if unknown.
+uint32_t tdefaultfg(void);
+// Returns the terminal's default background color, or TDEFAULT if unknown.
+uint32_t tdefaultbg(void);
 
 // Returns the next key if one is available, or TKEY_NONE otherwise.
 int tpoll(void);
 // Waits until a key or resize event is available and returns it.
 int twait(void);
 
-// Fills the back buffer with blank cells using the default colors.
+// Fills the back buffer with blank cells using the terminal default colors.
 void tclear(void);
 // Writes a single character into the back buffer at the given position.
 void tput(int x, int y, wchar_t ch, uint32_t fg, uint32_t bg);
@@ -82,6 +88,9 @@ typedef struct tstate_t {
   DWORD oldInMode;
   DWORD oldOutMode;
 
+  uint32_t defaultFg;
+  uint32_t defaultBg;
+
   int width;
   int height;
 
@@ -94,6 +103,48 @@ typedef struct tstate_t {
 } tstate_t;
 
 static tstate_t gTerm = {0};
+
+static uint32_t tcolorref_to_rgb(COLORREF color) {
+  return TRGB(GetRValue(color), GetGValue(color), GetBValue(color));
+}
+
+static uint32_t tansi_index_to_rgb(uint8_t index) {
+  static const uint32_t palette[16] = {
+      TRGB(0, 0, 0),       TRGB(128, 0, 0),     TRGB(0, 128, 0),
+      TRGB(128, 128, 0),   TRGB(0, 0, 128),     TRGB(128, 0, 128),
+      TRGB(0, 128, 128),   TRGB(192, 192, 192), TRGB(128, 128, 128),
+      TRGB(255, 0, 0),     TRGB(0, 255, 0),     TRGB(255, 255, 0),
+      TRGB(0, 0, 255),     TRGB(255, 0, 255),   TRGB(0, 255, 255),
+      TRGB(255, 255, 255),
+  };
+
+  return palette[index & 0x0f];
+}
+
+static void tloaddefaults(void) {
+  CONSOLE_SCREEN_BUFFER_INFO info;
+  if (!GetConsoleScreenBufferInfo(gTerm.out, &info)) {
+    gTerm.defaultFg = TDEFAULT;
+    gTerm.defaultBg = TDEFAULT;
+    return;
+  }
+
+  uint8_t fgIndex = (uint8_t)(info.wAttributes & 0x0f);
+  uint8_t bgIndex = (uint8_t)((info.wAttributes >> 4) & 0x0f);
+
+  CONSOLE_SCREEN_BUFFER_INFOEX infoEx;
+  memset(&infoEx, 0, sizeof(infoEx));
+  infoEx.cbSize = sizeof(infoEx);
+
+  if (GetConsoleScreenBufferInfoEx(gTerm.out, &infoEx)) {
+    gTerm.defaultFg = tcolorref_to_rgb(infoEx.ColorTable[fgIndex]);
+    gTerm.defaultBg = tcolorref_to_rgb(infoEx.ColorTable[bgIndex]);
+    return;
+  }
+
+  gTerm.defaultFg = tansi_index_to_rgb(fgIndex);
+  gTerm.defaultBg = tansi_index_to_rgb(bgIndex);
+}
 
 static void tappend(const char *text) {
   int len = (int)strlen(text);
@@ -161,12 +212,12 @@ static bool tallocbuff(void) {
 
   for (int i = 0; i < count; ++i) {
     gTerm.cells[i].ch = L' ';
-    gTerm.cells[i].fg = TRGB(220, 220, 220);
-    gTerm.cells[i].bg = TRGB(0, 0, 0);
+    gTerm.cells[i].fg = TDEFAULT;
+    gTerm.cells[i].bg = TDEFAULT;
 
     gTerm.oldCells[i].ch = 0;
-    gTerm.oldCells[i].fg = 0xffffffff;
-    gTerm.oldCells[i].bg = 0xffffffff;
+    gTerm.oldCells[i].fg = TDEFAULT;
+    gTerm.oldCells[i].bg = TDEFAULT;
   }
 
   return true;
@@ -209,6 +260,8 @@ bool tinit(void) {
   if (!SetConsoleMode(gTerm.out, outMode))
     return false;
 
+  tloaddefaults();
+
   tupdatesz();
 
   if (!tallocbuff())
@@ -240,6 +293,10 @@ void tquit(void) {
 int twidth(void) { return gTerm.width; }
 
 int theight(void) { return gTerm.height; }
+
+uint32_t tdefaultfg(void) { return gTerm.defaultFg; }
+
+uint32_t tdefaultbg(void) { return gTerm.defaultBg; }
 
 static int ttranslate(INPUT_RECORD *r) {
   if (r->EventType == WINDOW_BUFFER_SIZE_EVENT) {
@@ -332,8 +389,8 @@ void tclear(void) {
 
   for (int i = 0; i < count; ++i) {
     gTerm.cells[i].ch = L' ';
-    gTerm.cells[i].fg = TRGB(220, 220, 220);
-    gTerm.cells[i].bg = TRGB(0, 0, 0);
+    gTerm.cells[i].fg = TDEFAULT;
+    gTerm.cells[i].bg = TDEFAULT;
   }
 }
 
@@ -359,8 +416,8 @@ void twrite(int x, int y, const wchar_t *text, uint32_t fg, uint32_t bg) {
 void trender(void) {
   gTerm.outBufferCount = 0;
 
-  uint32_t currentFg = 0xffffffff;
-  uint32_t currentBg = 0xffffffff;
+  uint32_t currentFg = TDEFAULT;
+  uint32_t currentBg = TDEFAULT;
 
   for (int y = 0; y < gTerm.height; ++y) {
     for (int x = 0; x < gTerm.width; ++x) {
@@ -376,18 +433,26 @@ void trender(void) {
       tappendf("\x1b[%d;%dH", y + 1, x + 1);
 
       if (cell->fg != currentFg) {
-        uint8_t r = (uint8_t)((cell->fg >> 16) & 0xff);
-        uint8_t g = (uint8_t)((cell->fg >> 8) & 0xff);
-        uint8_t b = (uint8_t)(cell->fg & 0xff);
-        tappendf("\x1b[38;2;%u;%u;%um", r, g, b);
+        if (cell->fg == TDEFAULT) {
+          tappend("\x1b[39m");
+        } else {
+          uint8_t r = (uint8_t)((cell->fg >> 16) & 0xff);
+          uint8_t g = (uint8_t)((cell->fg >> 8) & 0xff);
+          uint8_t b = (uint8_t)(cell->fg & 0xff);
+          tappendf("\x1b[38;2;%u;%u;%um", r, g, b);
+        }
         currentFg = cell->fg;
       }
 
       if (cell->bg != currentBg) {
-        uint8_t r = (uint8_t)((cell->bg >> 16) & 0xff);
-        uint8_t g = (uint8_t)((cell->bg >> 8) & 0xff);
-        uint8_t b = (uint8_t)(cell->bg & 0xff);
-        tappendf("\x1b[48;2;%u;%u;%um", r, g, b);
+        if (cell->bg == TDEFAULT) {
+          tappend("\x1b[49m");
+        } else {
+          uint8_t r = (uint8_t)((cell->bg >> 16) & 0xff);
+          uint8_t g = (uint8_t)((cell->bg >> 8) & 0xff);
+          uint8_t b = (uint8_t)(cell->bg & 0xff);
+          tappendf("\x1b[48;2;%u;%u;%um", r, g, b);
+        }
         currentBg = cell->bg;
       }
 
@@ -433,6 +498,9 @@ typedef struct tstate_t {
   bool hasOldTermios;
   bool hasOldFlags;
   bool hasOldWinchHandler;
+
+  uint32_t defaultFg;
+  uint32_t defaultBg;
 
   int width;
   int height;
@@ -535,12 +603,12 @@ static bool tallocbuff(void) {
 
   for (int i = 0; i < count; ++i) {
     gTerm.cells[i].ch = L' ';
-    gTerm.cells[i].fg = TRGB(220, 220, 220);
-    gTerm.cells[i].bg = TRGB(0, 0, 0);
+    gTerm.cells[i].fg = TDEFAULT;
+    gTerm.cells[i].bg = TDEFAULT;
 
     gTerm.oldCells[i].ch = 0;
-    gTerm.oldCells[i].fg = 0xffffffff;
-    gTerm.oldCells[i].bg = 0xffffffff;
+    gTerm.oldCells[i].fg = TDEFAULT;
+    gTerm.oldCells[i].bg = TDEFAULT;
   }
 
   return true;
@@ -739,6 +807,8 @@ bool tinit(void) {
     return false;
   }
   gTerm.hasOldFlags = true;
+  gTerm.defaultFg = TDEFAULT;
+  gTerm.defaultBg = TDEFAULT;
 
   struct termios raw = gTerm.oldTermios;
   raw.c_iflag &= (tcflag_t) ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
@@ -803,6 +873,10 @@ int twidth(void) { return gTerm.width; }
 
 int theight(void) { return gTerm.height; }
 
+uint32_t tdefaultfg(void) { return gTerm.defaultFg; }
+
+uint32_t tdefaultbg(void) { return gTerm.defaultBg; }
+
 int tpoll(void) {
   if (gTermResizePending) {
     tresizebuffs();
@@ -830,8 +904,8 @@ void tclear(void) {
 
   for (int i = 0; i < count; ++i) {
     gTerm.cells[i].ch = L' ';
-    gTerm.cells[i].fg = TRGB(220, 220, 220);
-    gTerm.cells[i].bg = TRGB(0, 0, 0);
+    gTerm.cells[i].fg = TDEFAULT;
+    gTerm.cells[i].bg = TDEFAULT;
   }
 }
 
@@ -857,8 +931,8 @@ void twrite(int x, int y, const wchar_t *text, uint32_t fg, uint32_t bg) {
 void trender(void) {
   gTerm.outBufferCount = 0;
 
-  uint32_t currentFg = 0xffffffff;
-  uint32_t currentBg = 0xffffffff;
+  uint32_t currentFg = TDEFAULT;
+  uint32_t currentBg = TDEFAULT;
 
   for (int y = 0; y < gTerm.height; ++y) {
     for (int x = 0; x < gTerm.width; ++x) {
@@ -874,18 +948,26 @@ void trender(void) {
       tappendf("\x1b[%d;%dH", y + 1, x + 1);
 
       if (cell->fg != currentFg) {
-        uint8_t r = (uint8_t)((cell->fg >> 16) & 0xff);
-        uint8_t g = (uint8_t)((cell->fg >> 8) & 0xff);
-        uint8_t b = (uint8_t)(cell->fg & 0xff);
-        tappendf("\x1b[38;2;%u;%u;%um", r, g, b);
+        if (cell->fg == TDEFAULT) {
+          tappend("\x1b[39m");
+        } else {
+          uint8_t r = (uint8_t)((cell->fg >> 16) & 0xff);
+          uint8_t g = (uint8_t)((cell->fg >> 8) & 0xff);
+          uint8_t b = (uint8_t)(cell->fg & 0xff);
+          tappendf("\x1b[38;2;%u;%u;%um", r, g, b);
+        }
         currentFg = cell->fg;
       }
 
       if (cell->bg != currentBg) {
-        uint8_t r = (uint8_t)((cell->bg >> 16) & 0xff);
-        uint8_t g = (uint8_t)((cell->bg >> 8) & 0xff);
-        uint8_t b = (uint8_t)(cell->bg & 0xff);
-        tappendf("\x1b[48;2;%u;%u;%um", r, g, b);
+        if (cell->bg == TDEFAULT) {
+          tappend("\x1b[49m");
+        } else {
+          uint8_t r = (uint8_t)((cell->bg >> 16) & 0xff);
+          uint8_t g = (uint8_t)((cell->bg >> 8) & 0xff);
+          uint8_t b = (uint8_t)(cell->bg & 0xff);
+          tappendf("\x1b[48;2;%u;%u;%um", r, g, b);
+        }
         currentBg = cell->bg;
       }
 

@@ -38,6 +38,8 @@ In other translation units:
 
 - Text APIs use `wchar_t` and wide string literals like `L"text"`.
 - Colors are packed with `TRGB(r, g, b)`.
+- Use `TDEFAULT` for the terminal's default foreground or background color.
+- `tdefaultfg()` and `tdefaultbg()` return the resolved default colors when the backend can determine them. On Unix-like terminals they may return `TDEFAULT`.
 - The terminal backend expects a real console/TTY, not redirected stdin/stdout.
 
 ## License
