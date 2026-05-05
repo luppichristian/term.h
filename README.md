@@ -8,7 +8,7 @@ Single-header C library for simple terminal UIs with colored cell rendering and 
 
 - Single-header distribution in `term.h`
 - Colored cell-based rendering with diffed screen updates
-- Keyboard input helpers for arrows, enter, tab, backspace, and escape
+- Keyboard input helpers for arrows, home/end, insert/delete, page keys, function keys, and modifier-aware input
 - Terminal resize event support via `TKEY_RESIZE`
 - Works on Win32 consoles and Unix-like terminals
 
@@ -37,10 +37,10 @@ In other translation units:
 ## Notes
 
 - Text APIs use `wchar_t` and wide string literals like `L"text"`.
-- Colors are packed with `TRGB(r, g, b)`.
-- Use `TDEFAULT` for the terminal's default foreground or background color.
-- `tdefaultfg()` and `tdefaultbg()` return the resolved default colors when the backend can determine them. On Unix-like terminals they may return `TDEFAULT`.
+- Colors are packed with `TRGBA(r, g, b, a)` as `0xRRGGBBAA`. Alpha is preserved in the color value and currently ignored by terminal rendering.
+- Use `tdefaultfg()` and `tdefaultbg()` when you want to render with the terminal's current default colors.
 - The terminal backend expects a real console/TTY, not redirected stdin/stdout.
+- `twait()` and `tpoll()` return the base key code. Call `tkeymods()` after each returned key to inspect `TKEY_MOD_SHIFT`, `TKEY_MOD_ALT`, and `TKEY_MOD_CTRL`.
 
 ## License
 

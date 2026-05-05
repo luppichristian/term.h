@@ -1,3 +1,4 @@
 *.exe
 *.out
 .repo-compare/
+*.o
