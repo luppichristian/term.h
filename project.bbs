@@ -1,6 +1,6 @@
 # Using my build system https://github.com/luppichristian/bbs
 
-id(termh)
+id(termh_package)
 name("term.h")
 ver(0.0.0)
 
