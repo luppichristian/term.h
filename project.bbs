@@ -1,0 +1,38 @@
+# Using my build system https://github.com/luppichristian/bbs
+
+id(termh)
+name("term.h")
+ver(0.0.0)
+
+license(
+  type("MIT")
+  file("LICENSE")
+)
+
+targets(
+  header_lib(
+    id(termh)
+    output(termh)
+    include_dirs(
+      .
+    )
+    units(
+      term.h
+    )
+  )
+
+  console(
+    id(termh_example)
+    name("term.h Example")
+    output(term_example)
+    lang(c)
+    stdver(c11)
+    dependencies(termh)
+    include_dirs(
+      .
+    )
+    units(
+      term_example.c
+    )
+  )
+)
