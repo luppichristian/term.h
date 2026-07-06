@@ -11,7 +11,7 @@ license(
 
 targets(
   header_lib(
-    id(termh)
+    id(termh_header)
     output(termh)
     include_dirs(
       .
@@ -27,7 +27,7 @@ targets(
     output(term_example)
     lang(c)
     stdver(c11)
-    dependencies(termh)
+    dependencies(termh_header)
     include_dirs(
       .
     )
