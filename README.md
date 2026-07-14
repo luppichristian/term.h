@@ -1,5 +1,10 @@
 # term.h
 
+[![Single Header](https://img.shields.io/badge/distribution-single--header-blue)](https://github.com/luppichristian/term.h)
+[![Language](https://img.shields.io/badge/language-C-555555)](https://github.com/luppichristian/term.h)
+[![Platform](https://img.shields.io/badge/platform-Win32%20%7C%20Unix-blue)](https://github.com/luppichristian/term.h)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 Single-header C library for simple terminal UIs with colored cell rendering and keyboard input.
 
 ![Example terminal UI](term_example.png)
